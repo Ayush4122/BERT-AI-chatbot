@@ -2,12 +2,16 @@ import streamlit as st
 import requests
 from bs4 import BeautifulSoup
 from sentence_transformers import SentenceTransformer
-from transformers import AutoModelForQuestionAnswering, AutoTokenizer, pipeline
+from transformers import pipeline
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import torch
 from urllib.parse import urljoin
-import time
+import PyPDF2
+import io
+import fitz  # PyMuPDF
+import tempfile
+import os
 
 # Initialize BERT models
 @st.cache_resource
@@ -19,6 +23,55 @@ def load_models():
     except Exception as e:
         st.error(f"Error loading models: {str(e)}")
         return None, None
+
+def extract_pdf_content(pdf_file):
+    try:
+        content = ""
+        extracted_text = []
+        
+        with st.expander("📄 Extracted PDF Content", expanded=False):
+            status_text = st.empty()
+            
+            # Create a temporary file to store the PDF
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_file:
+                temp_file.write(pdf_file.getvalue())
+                temp_path = temp_file.name
+
+            try:
+                # Use PyMuPDF (fitz) for better text extraction
+                doc = fitz.open(temp_path)
+                total_pages = doc.page_count
+                
+                progress_bar = st.progress(0)
+                
+                for page_num in range(total_pages):
+                    status_text.text(f"Processing page {page_num + 1}/{total_pages}")
+                    
+                    page = doc[page_num]
+                    page_text = page.get_text()
+                    
+                    # Clean the text
+                    page_text = ' '.join(page_text.split())
+                    
+                    content += page_text + "\n\n"
+                    extracted_text.append(f"Page {page_num + 1}:\n{page_text[:500]}...\n\n")
+                    
+                    progress_bar.progress((page_num + 1) / total_pages)
+                
+                doc.close()
+                
+                status_text.text("PDF processing completed!")
+                st.text_area("Extracted Content Preview", '\n'.join(extracted_text), height=200)
+                
+            finally:
+                # Clean up the temporary file
+                os.unlink(temp_path)
+                
+        return content
+        
+    except Exception as e:
+        st.error(f"Error processing PDF: {str(e)}")
+        return None
 
 def fetch_website_content(url, max_pages=5):
     try:
@@ -58,7 +111,6 @@ def fetch_website_content(url, max_pages=5):
                     page_text = soup.get_text(separator=' ', strip=True)
                     page_text = ' '.join(page_text.split())
                     
-                    # Add to content
                     content += page_text + "\n\n"
                     extracted_text.append(f"Page {i+1}: {current_url}\n{page_text[:500]}...\n\n")
                     
@@ -146,9 +198,9 @@ def answer_question(question, context, qa_pipeline):
         return "Sorry, I encountered an error while trying to answer your question."
 
 # Streamlit UI
-st.set_page_config(page_title="Website Q&A Chatbot (BERT)", layout="wide")
+st.set_page_config(page_title="Document Q&A Chatbot (BERT)", layout="wide")
 
-st.title("Website Q&A Chatbot (BERT)")
+st.title("Document Q&A Chatbot (BERT)")
 st.markdown("""
     <style>
         .stTextInput > div > div > input {
@@ -176,24 +228,39 @@ if 'chunks' not in st.session_state:
 if 'chunk_embeddings' not in st.session_state:
     st.session_state.chunk_embeddings = None
 
-url = st.text_input("Enter website URL:", help="Enter the full URL including http:// or https://")
-if url:
-    if not (url.startswith('http://') or url.startswith('https://')):
-        st.error("Please enter a valid URL starting with http:// or https://")
-        st.stop()
+# Input method selection
+input_method = st.radio("Select input method:", ["Website URL", "PDF File"])
 
-question = st.text_input("Ask a question about the website:", help="Enter your question about the website content")
+if input_method == "Website URL":
+    url = st.text_input("Enter website URL:", help="Enter the full URL including http:// or https://")
+    if url:
+        if not (url.startswith('http://') or url.startswith('https://')):
+            st.error("Please enter a valid URL starting with http:// or https://")
+            st.stop()
+        
+        if not st.session_state.processing:
+            st.session_state.processing = True
+            with st.spinner("Processing website content..."):
+                st.session_state.content = fetch_website_content(url)
+                if st.session_state.content:
+                    st.session_state.chunks = split_text(st.session_state.content)
+                    st.session_state.chunk_embeddings = create_embeddings(st.session_state.chunks, embedding_model)
+            st.session_state.processing = False
+else:
+    uploaded_file = st.file_uploader("Upload PDF file", type=['pdf'])
+    if uploaded_file:
+        if not st.session_state.processing:
+            st.session_state.processing = True
+            with st.spinner("Processing PDF content..."):
+                st.session_state.content = extract_pdf_content(uploaded_file)
+                if st.session_state.content:
+                    st.session_state.chunks = split_text(st.session_state.content)
+                    st.session_state.chunk_embeddings = create_embeddings(st.session_state.chunks, embedding_model)
+            st.session_state.processing = False
 
-if url and not st.session_state.processing:
-    st.session_state.processing = True
-    with st.spinner("Processing website content..."):
-        st.session_state.content = fetch_website_content(url)
-        if st.session_state.content:
-            st.session_state.chunks = split_text(st.session_state.content)
-            st.session_state.chunk_embeddings = create_embeddings(st.session_state.chunks, embedding_model)
-    st.session_state.processing = False
+question = st.text_input("Ask a question about the document:", help="Enter your question about the content")
 
-if url and question and st.session_state.content:
+if question and st.session_state.content:
     try:
         with st.spinner("Finding answer..."):
             relevant_chunk = find_most_relevant_chunk(
