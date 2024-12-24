@@ -2,10 +2,12 @@ import streamlit as st
 import PyPDF2
 import torch
 from transformers import AutoTokenizer, AutoModel, AutoModelForQuestionAnswering
-from sentence_transformers import SentenceTransformer
 import numpy as np
 import re
 import faiss
+from gensim.models import Word2Vec
+from gensim.utils import simple_preprocess
+from numpy.linalg import norm
 
 class DocumentProcessor:
     def __init__(self, chunk_size: int = 200, chunk_overlap: int = 50):
@@ -14,11 +16,13 @@ class DocumentProcessor:
 
     def clean_text(self, text: str) -> str:
         """Clean and normalize text."""
-        # Remove extra whitespace
         text = re.sub(r'\s+', ' ', text)
-        # Remove special characters but keep punctuation
         text = re.sub(r'[^\w\s.,!?;:]', ' ', text)
         return text.strip()
+
+    def tokenize_text(self, text: str) -> list:
+        """Tokenize text into words."""
+        return simple_preprocess(text, deacc=True)
 
     def simple_split_into_sentences(self, text: str) -> list:
         """Split text into sentences using simple rules."""
@@ -67,15 +71,51 @@ class DocumentProcessor:
             st.error(f"Error processing PDF: {str(e)}")
             return None
 
-class VectorStore:
-    def __init__(self):
-        self.encoder = SentenceTransformer('sentence-transformers/all-mpnet-base-v2')
+class Word2VecVectorStore:
+    def __init__(self, vector_size=100, window=5, min_count=1):
+        self.vector_size = vector_size
+        self.window = window
+        self.min_count = min_count
+        self.model = None
         self.index = None
         self.chunks = None
+
+    def train_word2vec(self, chunks: list):
+        """Train Word2Vec model on the chunks."""
+        # Tokenize all chunks
+        tokenized_chunks = [simple_preprocess(chunk) for chunk in chunks]
+        
+        # Train Word2Vec model
+        self.model = Word2Vec(sentences=tokenized_chunks,
+                            vector_size=self.vector_size,
+                            window=self.window,
+                            min_count=self.min_count,
+                            workers=4)
+        
+    def get_chunk_embedding(self, chunk: str) -> np.ndarray:
+        """Get embedding for a chunk of text."""
+        tokens = simple_preprocess(chunk)
+        token_embeddings = []
+        
+        for token in tokens:
+            if token in self.model.wv:
+                token_embeddings.append(self.model.wv[token])
+        
+        if not token_embeddings:
+            return np.zeros(self.vector_size)
+        
+        # Average word embeddings to get chunk embedding
+        chunk_embedding = np.mean(token_embeddings, axis=0)
+        # Normalize the embedding
+        chunk_embedding = chunk_embedding / norm(chunk_embedding)
+        return chunk_embedding
 
     def create_index(self, chunks: list):
         """Create FAISS index from text chunks."""
         try:
+            # Train Word2Vec model first
+            self.train_word2vec(chunks)
+            
             # Create progress bar
             total_chunks = len(chunks)
             progress_bar = st.progress(0)
@@ -85,7 +125,7 @@ class VectorStore:
             embeddings = []
             for i, chunk in enumerate(chunks):
                 status_text.text(f'Processing chunk {i+1}/{total_chunks}')
-                embedding = self.encoder.encode(chunk)
+                embedding = self.get_chunk_embedding(chunk)
                 embeddings.append(embedding)
                 progress_bar.progress((i + 1) / total_chunks)
             
@@ -93,8 +133,7 @@ class VectorStore:
             embeddings = np.array(embeddings).astype('float32')
             
             # Create FAISS index
-            dimension = embeddings.shape[1]
-            self.index = faiss.IndexFlatL2(dimension)
+            self.index = faiss.IndexFlatL2(self.vector_size)
             self.index.add(embeddings)
             self.chunks = chunks
             
@@ -109,50 +148,12 @@ class VectorStore:
     def search(self, query: str, k: int = 3) -> list:
         """Search for relevant chunks."""
         try:
-            query_vector = self.encoder.encode([query])
-            D, I = self.index.search(query_vector.astype('float32'), k)
+            query_embedding = self.get_chunk_embedding(query)
+            D, I = self.index.search(query_embedding.reshape(1, -1).astype('float32'), k)
             return [(self.chunks[i], score) for i, score in zip(I[0], D[0])]
         except Exception as e:
             st.error(f"Error during search: {str(e)}")
             return []
-
-class QuestionAnswerer:
-    def __init__(self):
-        model_name = 'deepset/bert-base-cased-squad2'
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForQuestionAnswering.from_pretrained(model_name)
-
-    def get_answer(self, question: str, context: str) -> tuple:
-        """Get answer from context with confidence score."""
-        try:
-            inputs = self.tokenizer(
-                question,
-                context,
-                max_length=512,
-                truncation=True,
-                return_tensors="pt"
-            )
-
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-
-            start_scores = outputs.start_logits
-            end_scores = outputs.end_logits
-            
-            start_idx = torch.argmax(start_scores)
-            end_idx = torch.argmax(end_scores)
-            
-            start_score = torch.softmax(start_scores, dim=1).max().item()
-            end_score = torch.softmax(end_scores, dim=1).max().item()
-            confidence = (start_score + end_score) / 2
-
-            tokens = self.tokenizer.convert_ids_to_tokens(inputs["input_ids"][0])
-            answer = self.tokenizer.convert_tokens_to_string(tokens[start_idx:end_idx+1])
-
-            return answer, confidence
-        except Exception as e:
-            st.error(f"Error generating answer: {str(e)}")
-            return "", 0.0
 
 def main():
     st.title("📚 PDF Question Answering System")
@@ -160,7 +161,7 @@ def main():
     # Initialize models
     if 'processor' not in st.session_state:
         st.session_state.processor = DocumentProcessor()
-        st.session_state.vector_store = VectorStore()
+        st.session_state.vector_store = Word2VecVectorStore()
         st.session_state.qa_model = QuestionAnswerer()
     
     # File upload
