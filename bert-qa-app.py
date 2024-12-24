@@ -7,6 +7,7 @@ from numpy.linalg import norm
 import re
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
+from langchain.schema import Document
 
 # Document Processor Class
 class DocumentProcessor:
@@ -63,7 +64,8 @@ class LangChainVectorStore:
 
     def create_index(self, chunks):
         try:
-            self.vector_store = FAISS.from_texts(chunks, self.embeddings)
+            documents = [Document(page_content=chunk) for chunk in chunks]
+            self.vector_store = FAISS.from_documents(documents, self.embeddings)
         except Exception as e:
             st.error(f"Error creating index: {e}")
 
@@ -118,7 +120,7 @@ def main():
             with st.spinner("Finding answer..."):
                 results = st.session_state.vector_store.search(question)
                 if results:
-                    context = " ".join([chunk for chunk, _ in results])
+                    context = " ".join([doc.page_content for doc, _ in results])
                     answer, confidence = st.session_state.qa_engine.get_answer(question, context)
 
                     if answer:
@@ -127,9 +129,9 @@ def main():
                         st.progress(confidence)
 
                         with st.expander("View source contexts"):
-                            for i, (chunk, score) in enumerate(results, 1):
+                            for i, (doc, score) in enumerate(results, 1):
                                 st.markdown(f"**Relevant text {i}:**")
-                                st.write(chunk)
+                                st.write(doc.page_content)
                                 st.caption(f"Relevance score: {score:.2f}")
                     else:
                         st.warning("Could not generate an answer. Try rephrasing your question.")
