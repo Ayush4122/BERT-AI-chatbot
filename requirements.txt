@@ -5,6 +5,3 @@ sentence-transformers
 faiss-cpu
 PyPDF2
 numpy
-nltk
-tqdm
-protobuf
