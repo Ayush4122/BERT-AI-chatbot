@@ -6,16 +6,25 @@ from sentence_transformers import SentenceTransformer
 import numpy as np
 from typing import List, Tuple, Dict
 import re
-from nltk.tokenize import sent_tokenize
 import nltk
+from nltk.tokenize import sent_tokenize
 import faiss
 from tqdm import tqdm
 
-# Download required NLTK data
-try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
+# Initialize NLTK and download required data
+@st.cache_resource
+def initialize_nltk():
+    try:
+        nltk.download('punkt')
+    except Exception as e:
+        st.error(f"Error downloading NLTK data: {str(e)}")
+        return False
+    return True
+
+# Call initialization at startup
+if not initialize_nltk():
+    st.error("Failed to initialize NLTK. Please try restarting the application.")
+    st.stop()
 
 class DocumentProcessor:
     def __init__(self, chunk_size: int = 300, chunk_overlap: int = 100):
@@ -31,40 +40,39 @@ class DocumentProcessor:
         return text.strip()
 
     def create_chunks(self, text: str) -> List[str]:
-        """Create overlapping chunks of text that preserve sentence boundaries."""
-        sentences = sent_tokenize(text)
+        """Create overlapping chunks of text that preserve semantic boundaries."""
+        # First split by newlines to preserve document structure
+        paragraphs = text.split('\n')
         chunks = []
         current_chunk = []
         current_length = 0
 
-        for sentence in sentences:
-            sentence_length = len(sentence.split())
-            
-            if current_length + sentence_length <= self.chunk_size:
-                current_chunk.append(sentence)
-                current_length += sentence_length
-            else:
-                # Add the current chunk if it's not empty
-                if current_chunk:
-                    chunks.append(' '.join(current_chunk))
-                
-                # Start new chunk with overlap
-                overlap_chunk = []
-                overlap_length = 0
-                
-                # Add sentences from the end of the previous chunk for overlap
-                for prev_sentence in current_chunk[::-1]:
-                    prev_length = len(prev_sentence.split())
-                    if overlap_length + prev_length <= self.chunk_overlap:
-                        overlap_chunk.insert(0, prev_sentence)
-                        overlap_length += prev_length
-                    else:
-                        break
-                
-                current_chunk = overlap_chunk + [sentence]
-                current_length = sum(len(s.split()) for s in current_chunk)
+        for paragraph in paragraphs:
+            if not paragraph.strip():
+                continue
 
-        # Add the last chunk if it's not empty
+            # Split paragraph into sentences
+            try:
+                sentences = sent_tokenize(paragraph)
+            except Exception as e:
+                # Fallback to simple splitting if NLTK fails
+                sentences = [s.strip() + '.' for s in paragraph.split('.') if s.strip()]
+
+            for sentence in sentences:
+                sentence_length = len(sentence.split())
+                
+                if current_length + sentence_length <= self.chunk_size:
+                    current_chunk.append(sentence)
+                    current_length += sentence_length
+                else:
+                    if current_chunk:
+                        chunks.append(' '.join(current_chunk))
+                    
+                    # Start new chunk
+                    current_chunk = [sentence]
+                    current_length = sentence_length
+
+        # Add the last chunk if it exists
         if current_chunk:
             chunks.append(' '.join(current_chunk))
 
@@ -76,7 +84,7 @@ class DocumentProcessor:
             pdf_reader = PyPDF2.PdfReader(pdf_file)
             text = ""
             for page in pdf_reader.pages:
-                text += page.extract_text()
+                text += page.extract_text() + "\n"
 
             # Clean the text
             cleaned_text = self.clean_text(text)
@@ -98,11 +106,13 @@ class VectorStore:
 
     def create_index(self, chunks: List[str]):
         """Create FAISS index from text chunks."""
-        # Create embeddings with progress bar
+        # Create embeddings
         embeddings = []
-        for chunk in tqdm(chunks, desc="Creating embeddings"):
-            embedding = self.encoder.encode(chunk)
-            embeddings.append(embedding)
+        with st.progress(0.0) as progress_bar:
+            for i, chunk in enumerate(chunks):
+                embedding = self.encoder.encode(chunk)
+                embeddings.append(embedding)
+                progress_bar.progress((i + 1) / len(chunks))
         
         embeddings = np.array(embeddings).astype('float32')
         
