@@ -1,9 +1,8 @@
 streamlit
+PyPDF2
 torch
 transformers
-sentence-transformers
-faiss-cpu
-PyPDF2
 numpy
+faiss-cpu
 gensim
-scipy
+langchain
