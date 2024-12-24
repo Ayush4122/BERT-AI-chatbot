@@ -5,9 +5,6 @@ from transformers import AutoTokenizer, AutoModelForQuestionAnswering
 import numpy as np
 from numpy.linalg import norm
 import re
-import faiss
-from gensim.utils import simple_preprocess
-from gensim.models import Word2Vec
 from langchain.embeddings import HuggingFaceEmbeddings
 from langchain.vectorstores import FAISS
 
@@ -58,38 +55,24 @@ class DocumentProcessor:
             st.error(f"Error processing PDF: {e}")
             return None
 
-# Word2Vec-based Vector Store
-class Word2VecVectorStore:
-    def __init__(self, vector_size=100, window=5, min_count=1):
-        self.vector_size = vector_size
-        self.window = window
-        self.min_count = min_count
-        self.model = None
-        self.index = None
-        self.chunks = None
-
-    def train_word2vec(self, chunks):
-        tokenized_chunks = [simple_preprocess(chunk) for chunk in chunks]
-        self.model = Word2Vec(tokenized_chunks, vector_size=self.vector_size, window=self.window, min_count=self.min_count, workers=4)
-
-    def get_chunk_embedding(self, chunk):
-        tokens = simple_preprocess(chunk)
-        embeddings = [self.model.wv[token] for token in tokens if token in self.model.wv]
-        if embeddings:
-            return np.mean(embeddings, axis=0) / norm(np.mean(embeddings, axis=0))
-        return np.zeros(self.vector_size)
+# LangChain-based Vector Store
+class LangChainVectorStore:
+    def __init__(self):
+        self.embeddings = HuggingFaceEmbeddings()
+        self.vector_store = None
 
     def create_index(self, chunks):
-        self.train_word2vec(chunks)
-        embeddings = np.array([self.get_chunk_embedding(chunk) for chunk in chunks]).astype('float32')
-        self.index = faiss.IndexFlatL2(self.vector_size)
-        self.index.add(embeddings)
-        self.chunks = chunks
+        try:
+            self.vector_store = FAISS.from_texts(chunks, self.embeddings)
+        except Exception as e:
+            st.error(f"Error creating index: {e}")
 
     def search(self, query, k=3):
-        query_embedding = self.get_chunk_embedding(query).reshape(1, -1).astype('float32')
-        distances, indices = self.index.search(query_embedding, k)
-        return [(self.chunks[i], distances[0][j]) for j, i in enumerate(indices[0])]
+        try:
+            return self.vector_store.similarity_search_with_score(query, k)
+        except Exception as e:
+            st.error(f"Error during search: {e}")
+            return []
 
 # Question Answering Model
 class QAEngine:
@@ -113,7 +96,7 @@ def main():
     # Initialize models
     if 'processor' not in st.session_state:
         st.session_state.processor = DocumentProcessor()
-        st.session_state.vector_store = Word2VecVectorStore()
+        st.session_state.vector_store = LangChainVectorStore()
         st.session_state.qa_engine = QAEngine()
 
     # File upload
@@ -147,7 +130,7 @@ def main():
                             for i, (chunk, score) in enumerate(results, 1):
                                 st.markdown(f"**Relevant text {i}:**")
                                 st.write(chunk)
-                                st.caption(f"Relevance score: {1/(1+score):.2%}")
+                                st.caption(f"Relevance score: {score:.2f}")
                     else:
                         st.warning("Could not generate an answer. Try rephrasing your question.")
                 else:
