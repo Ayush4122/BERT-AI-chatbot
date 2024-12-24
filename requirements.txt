@@ -4,5 +4,4 @@ torch
 transformers
 numpy
 faiss-cpu
-gensim
 langchain
