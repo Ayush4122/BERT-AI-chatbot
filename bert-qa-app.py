@@ -3,6 +3,7 @@ import PyPDF2
 import torch
 from transformers import AutoTokenizer, AutoModel, AutoModelForQuestionAnswering
 import numpy as np
+from numpy import triu
 import re
 import faiss
 from gensim.models import Word2Vec
