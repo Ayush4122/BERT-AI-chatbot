@@ -21,8 +21,8 @@ def load_documents(file):
         loader = PyMuPDFLoader(file.name)
     elif file.type == "application/json":
         try:
-            # Make sure jq_schema is valid
-            jq_schema = '$.data'  # Correct syntax for jq path
+            # Correctly specify the jq path without extra quotes or characters
+            jq_schema = "$.data"  # Ensure no extra quotes or invalid characters
             loader = JSONLoader(file.name, jq_schema=jq_schema)
         except Exception as e:
             st.error(f"Error loading JSON file: {e}")
