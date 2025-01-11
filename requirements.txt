@@ -1,6 +1,7 @@
 transformers
 sentence-transformers
 langchain
+langchain-community
 faiss-cpu
 streamlit
 pymupdf
