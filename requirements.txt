@@ -1,9 +1,6 @@
-streamlit
-PyPDF2
-torch
 transformers
-numpy
-faiss-cpu
-langchain
-langchain_community
 sentence-transformers
+langchain
+faiss-cpu
+streamlit
+pymupdf
