@@ -16,13 +16,15 @@ def load_bert_model():
     return model
 
 # Load documents from a PDF or JSON file
+from langchain_community.document_loaders import JSONLoader
+
 def load_documents(file):
     if file.type == "application/pdf":
         loader = PyMuPDFLoader(file.name)
     elif file.type == "application/json":
         try:
-            # Correctly specify the jq path without extra quotes or characters
-            jq_schema = "$"  # Ensure no extra quotes or invalid characters
+            # Update the jq_schema based on the actual structure
+            jq_schema = "$"  # Use $ to access the root array if no "data" key is present
             loader = JSONLoader(file.name, jq_schema=jq_schema)
         except Exception as e:
             st.error(f"Error loading JSON file: {e}")
