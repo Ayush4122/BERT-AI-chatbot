@@ -22,7 +22,7 @@ def load_documents(file):
     elif file.type == "application/json":
         try:
             # Correctly specify the jq path without extra quotes or characters
-            jq_schema = "$.data"  # Ensure no extra quotes or invalid characters
+            jq_schema = "$"  # Ensure no extra quotes or invalid characters
             loader = JSONLoader(file.name, jq_schema=jq_schema)
         except Exception as e:
             st.error(f"Error loading JSON file: {e}")
