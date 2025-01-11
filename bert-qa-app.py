@@ -1,9 +1,10 @@
 import streamlit as st
 from transformers import AutoTokenizer, AutoModel
 from sentence_transformers import SentenceTransformer
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
+from langchain_community.document_loaders import PyMuPDFLoader
+from langchain_community.document_loaders import JSONLoader
 from langchain.chains import RetrievalQA
-from langchain.document_loaders import PyMuPDFLoader, JSONLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.llms import HuggingFaceHub
 import os
@@ -19,12 +20,13 @@ def load_documents(file):
     if file.type == "application/pdf":
         loader = PyMuPDFLoader(file.name)
     elif file.type == "application/json":
-        loader = JSONLoader(file.name)
+        # Define jq_schema or pass it as needed
+        jq_schema = "$.data"  # For example, specify a path to the relevant data in the JSON
+        loader = JSONLoader(file.name, jq_schema=jq_schema)
     else:
         st.error("Unsupported file type. Please upload a PDF or JSON file.")
         return None
     return loader.load()
-
 # Split documents into chunks
 def split_documents(documents):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
