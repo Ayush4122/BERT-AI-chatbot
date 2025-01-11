@@ -20,9 +20,13 @@ def load_documents(file):
     if file.type == "application/pdf":
         loader = PyMuPDFLoader(file.name)
     elif file.type == "application/json":
-        # Define jq_schema or pass it as needed
-        jq_schema = "$.data"  # For example, specify a path to the relevant data in the JSON
-        loader = JSONLoader(file.name, jq_schema=jq_schema)
+        try:
+            # Make sure jq_schema is valid
+            jq_schema = '$.data'  # Correct syntax for jq path
+            loader = JSONLoader(file.name, jq_schema=jq_schema)
+        except Exception as e:
+            st.error(f"Error loading JSON file: {e}")
+            return None
     else:
         st.error("Unsupported file type. Please upload a PDF or JSON file.")
         return None
