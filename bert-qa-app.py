@@ -1,19 +1,18 @@
 import torch
 import streamlit as st
-from transformers import BertTokenizer, BertForQuestionAnswering, BertModel
-from transformers import AutoModelForSequenceClassification, AutoTokenizer
+from transformers import AutoTokenizer, AutoModelForQuestionAnswering, AutoModel
+from transformers import AutoModelForSequenceClassification
 import numpy as np
 
 class FitnessBERTChatbot:
     def __init__(self):
         # Load pre-trained BERT model and tokenizer
-        self.tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+        self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
         
         # Question answering model
-        self.qa_model = BertForQuestionAnswering.from_pretrained('bert-large-uncased-whole-word-masking-finetuned-squad')
+        self.qa_model = AutoModelForQuestionAnswering.from_pretrained('bert-large-uncased-whole-word-masking-finetuned-squad')
         
         # Intent classification model
-        self.intent_tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
         self.intent_model = AutoModelForSequenceClassification.from_pretrained('bert-base-uncased', num_labels=5)
         
         # Predefined fitness knowledge base
@@ -37,7 +36,7 @@ class FitnessBERTChatbot:
 
     def classify_intent(self, query):
         """Classify the intent of the user's query"""
-        inputs = self.intent_tokenizer(query, return_tensors="pt", truncation=True, padding=True)
+        inputs = self.tokenizer(query, return_tensors="pt", truncation=True, padding=True)
         outputs = self.intent_model(**inputs)
         intent_labels = ['exercise', 'nutrition', 'recovery', 'injury', 'general']
         predicted_intent = intent_labels[torch.argmax(outputs.logits).item()]
@@ -51,7 +50,7 @@ class FitnessBERTChatbot:
         # Retrieve relevant knowledge
         relevant_info = self.knowledge_base.get(intent, [])
         
-        # Use BERT QA model to extract precise answer
+        # Use QA model to extract precise answer
         best_answer = ""
         max_score = 0
         
